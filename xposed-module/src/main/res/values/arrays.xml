@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- LSPosed recommended scope: apply to all apps by default.
+         User can narrow it down to specific apps in LSPosed Manager. -->
+    <string-array name="xposed_scope">
+        <!-- Empty = user selects target apps in LSPosed Manager -->
+    </string-array>
+</resources>
