@@ -32,6 +32,10 @@ class RealisticLocationSimulator(
     private var jitterPhaseX = random.nextDouble() * 2 * Math.PI
     private var jitterPhaseY = random.nextDouble() * 2 * Math.PI
 
+    // Stable satellite count per session (real GPS doesn't wildly fluctuate satellite count)
+    private var baseSatellites = 8 + random.nextInt(5) // 8-12 base
+    private var baseSatellitesInFix = baseSatellites - 2 - random.nextInt(2) // slightly fewer in fix
+
     /**
      * Creates a realistic GPS Location object from the given coordinates.
      */
@@ -94,11 +98,41 @@ class RealisticLocationSimulator(
             location.accuracy = config.baseAccuracyMeters
         }
 
+        // Vertical accuracy (API 26+) - missing this is a detection signal
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            location.verticalAccuracyMeters = 3f + random.nextFloat() * 5f
+        }
+
+        // Elapsed realtime uncertainty (API 29+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                val method = Location::class.java.getMethod(
+                    "setElapsedRealtimeUncertaintyNanos", Double::class.javaPrimitiveType
+                )
+                method.invoke(location, 20.0 + random.nextDouble() * 30.0)
+            } catch (_: Exception) { }
+        }
+
         // Add satellite info extras for GPS provider
         if (provider == LocationManager.GPS_PROVIDER) {
             location.extras = Bundle().apply {
-                putInt("satellites", 7 + random.nextInt(8)) // 7-14 satellites
-                putInt("satellitesInFix", 5 + random.nextInt(6)) // 5-10 in fix
+                // Slowly vary satellite count for realism
+                val satVariation = random.nextInt(3) - 1 // -1, 0, +1
+                val sats = (baseSatellites + satVariation).coerceIn(6, 15)
+                val satsInFix = (baseSatellitesInFix + satVariation).coerceIn(4, sats)
+                putInt("satellites", sats)
+                putInt("satellitesInFix", satsInFix)
+                // Extra GNSS fields that real GPS provides
+                putFloat("maxCn0", 30f + random.nextFloat() * 15f) // max signal strength
+                putFloat("meanCn0", 20f + random.nextFloat() * 10f) // mean signal strength
+            }
+        }
+
+        // Add network location extras (missing these is detectable)
+        if (provider == LocationManager.NETWORK_PROVIDER) {
+            location.extras = Bundle().apply {
+                putString("networkLocationType", "wifi")
+                putInt("travelState", 0) // stationary
             }
         }
 
@@ -215,33 +249,11 @@ class RealisticLocationSimulator(
 
     /**
      * Removes the isFromMockProvider flag using reflection (Method 4 & 5 bypass).
-     * This is the key technique to bypass isFromMockProvider() checks.
+     * Note: The Android framework may re-apply this flag when delivering via
+     * setTestProviderLocation(). This is best-effort and works on some ROMs.
      */
     private fun removeMockProviderFlag(location: Location) {
-        try {
-            // Method 1: Use reflection to set isFromMockProvider = false
-            val isMockField: Field = Location::class.java.getDeclaredField("mIsMock")
-            isMockField.isAccessible = true
-            isMockField.setBoolean(location, false)
-        } catch (e: NoSuchFieldException) {
-            // Field name varies by Android version, try alternatives
-            try {
-                val field = Location::class.java.getDeclaredField("mIsFromMockProvider")
-                field.isAccessible = true
-                field.setBoolean(location, false)
-            } catch (e2: Exception) {
-                // Try via extras bundle
-                try {
-                    location.extras = (location.extras ?: Bundle()).apply {
-                        putBoolean("mockProvider", false)
-                    }
-                } catch (_: Exception) { }
-            }
-        } catch (e: Exception) {
-            // Silently fail - some ROMs may have different internals
-        }
-
-        // Also try the public API if available (API 31+)
+        // Try API 31+ public method first
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             try {
                 val method = Location::class.java.getDeclaredMethod("setMock", Boolean::class.javaPrimitiveType)
@@ -249,6 +261,28 @@ class RealisticLocationSimulator(
                 method.invoke(location, false)
             } catch (_: Exception) { }
         }
+
+        try {
+            // Try mIsMock field (newer Android versions)
+            val isMockField: Field = Location::class.java.getDeclaredField("mIsMock")
+            isMockField.isAccessible = true
+            isMockField.setBoolean(location, false)
+        } catch (_: NoSuchFieldException) {
+            try {
+                // Try mIsFromMockProvider field (older Android versions)
+                val field = Location::class.java.getDeclaredField("mIsFromMockProvider")
+                field.isAccessible = true
+                field.setBoolean(location, false)
+            } catch (_: Exception) { }
+        } catch (_: Exception) { }
+
+        // Clear mock-related extras
+        try {
+            location.extras = (location.extras ?: Bundle()).apply {
+                remove("mockProvider")
+                remove("isMock")
+            }
+        } catch (_: Exception) { }
     }
 
     /**
@@ -273,5 +307,7 @@ class RealisticLocationSimulator(
         smoothedBearing = 0f
         jitterPhaseX = random.nextDouble() * 2 * Math.PI
         jitterPhaseY = random.nextDouble() * 2 * Math.PI
+        baseSatellites = 8 + random.nextInt(5)
+        baseSatellitesInFix = baseSatellites - 2 - random.nextInt(2)
     }
 }

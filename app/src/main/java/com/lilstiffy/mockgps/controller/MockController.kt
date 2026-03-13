@@ -5,7 +5,6 @@ import android.location.LocationManager
 import android.location.provider.ProviderProperties
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.widget.Toast
 import com.google.android.gms.maps.model.LatLng
 import kotlinx.coroutines.CoroutineScope
@@ -14,16 +13,17 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.Random
 
 /**
  * Enhanced mock location controller with anti-detection bypass capabilities.
  *
  * Bypasses:
- * - Method 1 (Triangulation): Dual GPS + Network provider mocking
+ * - Method 1 (Triangulation): GPS + Network + Passive provider mocking
  * - Method 2 (Motion Analysis): Realistic speed/bearing via RealisticLocationSimulator
  * - Method 3 (Sensor Fusion): Consistent location properties
  * - Method 4 & 5 (Play Integrity / App detection): isFromMockProvider flag removal
- * - Method 6 (AI Pattern): Natural GPS jitter, altitude/accuracy variation
+ * - Method 6 (AI Pattern): Natural GPS jitter, altitude/accuracy variation, timing jitter
  */
 class MockController(
     private val context: Context
@@ -35,6 +35,9 @@ class MockController(
     private var updateJob: Job? = null
     private var gpsProviderRegistered = false
     private var networkProviderRegistered = false
+    private var passiveProviderRegistered = false
+
+    private val random = Random(System.nanoTime())
 
     var config: AntiDetectionConfig = AntiDetectionConfig()
         set(value) {
@@ -62,16 +65,26 @@ class MockController(
             ensureTestProvider(NETWORK_PROVIDER)
         }
 
+        // Register passive provider to cover apps listening passively
+        if (!passiveProviderRegistered) {
+            ensureTestProvider(PASSIVE_PROVIDER)
+        }
+
         simulator.reset()
 
         updateJob = scope.launch {
             locationManager.setTestProviderEnabled(GPS_PROVIDER, true)
+
             if (config.mockNetworkProvider && networkProviderRegistered) {
                 try {
                     locationManager.setTestProviderEnabled(NETWORK_PROVIDER, true)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Could not enable network provider: ${e.message}")
-                }
+                } catch (_: Exception) { }
+            }
+
+            if (passiveProviderRegistered) {
+                try {
+                    locationManager.setTestProviderEnabled(PASSIVE_PROVIDER, true)
+                } catch (_: Exception) { }
             }
 
             while (isActive) {
@@ -86,12 +99,22 @@ class MockController(
                     try {
                         val networkLocation = simulator.createNetworkLocation(latLng)
                         locationManager.setTestProviderLocation(NETWORK_PROVIDER, networkLocation)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Network provider update failed: ${e.message}")
-                    }
+                    } catch (_: Exception) { }
                 }
 
-                delay(LOCATION_PUSH_DELAY_MS)
+                // Push to passive provider
+                if (passiveProviderRegistered) {
+                    try {
+                        val passiveLocation = simulator.createGpsLocation(latLng).apply {
+                            provider = PASSIVE_PROVIDER
+                        }
+                        locationManager.setTestProviderLocation(PASSIVE_PROVIDER, passiveLocation)
+                    } catch (_: Exception) { }
+                }
+
+                // Timing jitter: 180-220ms instead of constant 200ms (Method 6 - AI bypass)
+                val jitteredDelay = BASE_DELAY_MS + random.nextInt(JITTER_RANGE_MS) - (JITTER_RANGE_MS / 2)
+                delay(jitteredDelay.toLong())
             }
         }
 
@@ -99,20 +122,35 @@ class MockController(
     }
 
     /**
-     * Stops the active mock location loop.
+     * Stops the active mock location loop and cleans up test providers.
      */
     fun stop() {
         updateJob?.cancel()
         updateJob = null
 
+        // Reset simulator state for clean restart
+        simulator.reset()
+
+        // Disable and REMOVE test providers to prevent detection
         if (gpsProviderRegistered) {
             try {
                 locationManager.setTestProviderEnabled(GPS_PROVIDER, false)
+                locationManager.removeTestProvider(GPS_PROVIDER)
+                gpsProviderRegistered = false
             } catch (_: Exception) { }
         }
         if (networkProviderRegistered) {
             try {
                 locationManager.setTestProviderEnabled(NETWORK_PROVIDER, false)
+                locationManager.removeTestProvider(NETWORK_PROVIDER)
+                networkProviderRegistered = false
+            } catch (_: Exception) { }
+        }
+        if (passiveProviderRegistered) {
+            try {
+                locationManager.setTestProviderEnabled(PASSIVE_PROVIDER, false)
+                locationManager.removeTestProvider(PASSIVE_PROVIDER)
+                passiveProviderRegistered = false
             } catch (_: Exception) { }
         }
     }
@@ -120,11 +158,12 @@ class MockController(
     private fun ensureTestProvider(providerName: String): Boolean {
         return try {
             val isGps = providerName == GPS_PROVIDER
+            val isPassive = providerName == PASSIVE_PROVIDER
             locationManager.addTestProvider(
                 providerName,
-                /* requiresNetwork = */ !isGps,
+                /* requiresNetwork = */ !isGps && !isPassive,
                 /* requiresSatellite = */ isGps,
-                /* requiresCell = */ !isGps,
+                /* requiresCell = */ !isGps && !isPassive,
                 /* hasMonetaryCost = */ false,
                 /* supportsAltitude = */ true,
                 /* supportsSpeed = */ true,
@@ -132,7 +171,11 @@ class MockController(
                 if (isGps) ProviderProperties.POWER_USAGE_HIGH else ProviderProperties.POWER_USAGE_LOW,
                 if (isGps) ProviderProperties.ACCURACY_FINE else ProviderProperties.ACCURACY_COARSE
             )
-            if (isGps) gpsProviderRegistered = true else networkProviderRegistered = true
+            when (providerName) {
+                GPS_PROVIDER -> gpsProviderRegistered = true
+                NETWORK_PROVIDER -> networkProviderRegistered = true
+                PASSIVE_PROVIDER -> passiveProviderRegistered = true
+            }
             true
         } catch (securityException: SecurityException) {
             Handler(Looper.getMainLooper()).post {
@@ -145,15 +188,21 @@ class MockController(
             false
         } catch (illegalArgumentException: IllegalArgumentException) {
             // The provider already exists – treat as success.
-            if (providerName == GPS_PROVIDER) gpsProviderRegistered = true else networkProviderRegistered = true
+            when (providerName) {
+                GPS_PROVIDER -> gpsProviderRegistered = true
+                NETWORK_PROVIDER -> networkProviderRegistered = true
+                PASSIVE_PROVIDER -> passiveProviderRegistered = true
+            }
             true
         }
     }
 
     companion object {
-        private const val TAG = "MockController"
         private const val GPS_PROVIDER = LocationManager.GPS_PROVIDER
         private const val NETWORK_PROVIDER = LocationManager.NETWORK_PROVIDER
+        private const val PASSIVE_PROVIDER = LocationManager.PASSIVE_PROVIDER
+        private const val BASE_DELAY_MS = 200
+        private const val JITTER_RANGE_MS = 40 // ±20ms jitter
         const val LOCATION_PUSH_DELAY_MS = 200L
     }
 }

@@ -4,7 +4,6 @@ import android.app.Service
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
-import android.util.Log
 import android.widget.Toast
 import com.google.android.gms.maps.model.LatLng
 import com.lilstiffy.mockgps.controller.AntiDetectionConfig
@@ -15,7 +14,6 @@ import com.lilstiffy.mockgps.storage.StorageManager
 class MockLocationService : Service() {
 
     companion object {
-        const val TAG = "MockLocationService"
         var instance: MockLocationService? = null
     }
 
@@ -36,7 +34,6 @@ class MockLocationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service created")
         mockController = MockController(this)
         mockController.config = antiDetectionConfig
     }
@@ -52,7 +49,6 @@ class MockLocationService : Service() {
     override fun onDestroy() {
         stopMockingLocation()
         super.onDestroy()
-        Log.d(TAG, "Service destroyed")
     }
 
     fun toggleMocking() {
@@ -93,7 +89,6 @@ class MockLocationService : Service() {
             val started = mockController.start { latLng }
             if (started) {
                 isMocking = true
-                Log.d(TAG, "Mock location started with anti-detection: $antiDetectionConfig")
             }
         }
     }
@@ -102,7 +97,6 @@ class MockLocationService : Service() {
         if (isMocking) {
             mockController.stop()
             isMocking = false
-            Log.d(TAG, "Mock location stopped")
         }
     }
 
