@@ -127,7 +127,7 @@ fun AntiDetectionPanel(
                     expanded = expanded,
                     onDismissRequest = { expanded = false }
                 ) {
-                    MovementMode.entries.forEach { mode ->
+                    MovementMode.values().forEach { mode ->
                         DropdownMenuItem(
                             text = { Text("${mode.name} (max ${mode.maxSpeedKmh} km/h)") },
                             onClick = {
