@@ -87,4 +87,7 @@ dependencies {
     //Gson
     implementation("com.google.code.gson:gson:2.10.1")
 
+    // ConstraintLayout
+    implementation("androidx.constraintlayout:constraintlayout:2.1.4")
+
 }

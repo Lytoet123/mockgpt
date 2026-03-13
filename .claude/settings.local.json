@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep -r anti G:ArchivesMockGps-feature-route-csvMockGps-feature-route-csv --include=*.kt --include=*.java)"
+      "Bash(grep -r anti G:ArchivesMockGps-feature-route-csvMockGps-feature-route-csv --include=*.kt --include=*.java)",
+      "Bash(gh repo:*)",
+      "Bash(where gh:*)",
+      "Bash(where git:*)"
     ]
   }
 }
