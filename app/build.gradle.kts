@@ -90,4 +90,13 @@ dependencies {
     // ConstraintLayout
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
 
+    // Coroutines (explicit - used by MockController, RouteController, LocationMocker)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // Foundation text (KeyboardOptions)
+    implementation("androidx.compose.foundation:foundation")
+
+    // Compose UI Text (KeyboardType)
+    implementation("androidx.compose.ui:ui-text")
+
 }
