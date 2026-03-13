@@ -7,7 +7,7 @@ import android.os.Bundle
 import com.google.android.gms.maps.model.LatLng
 import java.lang.reflect.Field
 import kotlin.math.*
-import kotlin.random.Random
+import java.util.Random
 
 /**
  * Generates realistic Location objects that bypass common GPS spoofing detection:
