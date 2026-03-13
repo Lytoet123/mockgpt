@@ -2,9 +2,12 @@ package com.lilstiffy.mockgps.service
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.location.provider.ProviderProperties
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
 import com.lilstiffy.mockgps.controller.AntiDetectionConfig
 import com.lilstiffy.mockgps.controller.RealisticLocationSimulator
@@ -14,17 +17,21 @@ import kotlinx.coroutines.launch
 import java.util.Random
 
 /**
- * Legacy location mocker - updated with anti-detection bypass.
+ * Legacy location mocker - updated with FusedLocation + anti-detection bypass.
  */
 class LocationMocker(context: Context) {
     private val locationManager by lazy {
         context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     }
 
+    private val fusedClient: FusedLocationProviderClient =
+        LocationServices.getFusedLocationProviderClient(context)
+
     private var isMocking = false
     lateinit var latLng: LatLng
     var listener: LocationListener? = null
     private val random = Random(System.nanoTime())
+    private var fusedMockEnabled = false
 
     var config: AntiDetectionConfig = AntiDetectionConfig()
         set(value) {
@@ -74,6 +81,9 @@ class LocationMocker(context: Context) {
                 try { locationManager.setTestProviderEnabled(LocationManager.PASSIVE_PROVIDER, true) } catch (_: Exception) {}
             }
 
+            // Enable FusedLocationProviderClient mock mode
+            enableFusedMock()
+
             CoroutineScope(Dispatchers.IO).launch {
                 mockLocation()
             }
@@ -84,11 +94,43 @@ class LocationMocker(context: Context) {
         if (isMocking) {
             isMocking = false
             simulator.reset()
-            // Remove test providers to prevent detection
+            disableFusedMock()
             removeProvider(LocationManager.GPS_PROVIDER)
             removeProvider(LocationManager.NETWORK_PROVIDER)
             removeProvider(LocationManager.PASSIVE_PROVIDER)
         }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun enableFusedMock() {
+        try {
+            fusedClient.setMockMode(true)
+                .addOnSuccessListener { fusedMockEnabled = true }
+                .addOnFailureListener { fusedMockEnabled = false }
+        } catch (_: Exception) { fusedMockEnabled = false }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun disableFusedMock() {
+        if (fusedMockEnabled) {
+            try {
+                fusedClient.setMockMode(false)
+                fusedMockEnabled = false
+            } catch (_: Exception) {}
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun pushFusedLocation(baseLocation: Location) {
+        if (!fusedMockEnabled) return
+        try {
+            val fusedLocation = Location(baseLocation).apply {
+                provider = "fused"
+                time = System.currentTimeMillis()
+                elapsedRealtimeNanos = System.nanoTime()
+            }
+            fusedClient.setMockLocation(fusedLocation)
+        } catch (_: Exception) {}
     }
 
     private fun registerProvider(providerName: String) {
@@ -153,7 +195,10 @@ class LocationMocker(context: Context) {
                 } catch (_: Exception) {}
             }
 
-            // Timing jitter: 180-220ms instead of constant 200ms
+            // FusedLocationProviderClient (CRITICAL for modern apps)
+            pushFusedLocation(gpsLocation)
+
+            // Timing jitter: 180-220ms
             val jitteredDelay = 200L + random.nextInt(40) - 20
             kotlinx.coroutines.delay(jitteredDelay)
         }

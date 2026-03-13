@@ -81,6 +81,9 @@ dependencies {
     // Google maps for Compose
     implementation("com.google.maps.android:maps-compose:4.3.0")
 
+    // Google Play Services Location (for FusedLocationProviderClient mock)
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+
     // Viewmodel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
 

@@ -1,11 +1,14 @@
 package com.lilstiffy.mockgps.controller
 
 import android.content.Context
+import android.location.Location
 import android.location.LocationManager
 import android.location.provider.ProviderProperties
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.model.LatLng
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,7 +22,7 @@ import java.util.Random
  * Enhanced mock location controller with anti-detection bypass capabilities.
  *
  * Bypasses:
- * - Method 1 (Triangulation): GPS + Network + Passive provider mocking
+ * - Method 1 (Triangulation): GPS + Network + Passive + Fused provider mocking
  * - Method 2 (Motion Analysis): Realistic speed/bearing via RealisticLocationSimulator
  * - Method 3 (Sensor Fusion): Consistent location properties
  * - Method 4 & 5 (Play Integrity / App detection): isFromMockProvider flag removal
@@ -31,11 +34,16 @@ class MockController(
     private val locationManager =
         context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
+    // FusedLocationProviderClient - this is what most modern apps use
+    private val fusedClient: FusedLocationProviderClient =
+        LocationServices.getFusedLocationProviderClient(context)
+
     private val scope = CoroutineScope(Dispatchers.IO)
     private var updateJob: Job? = null
     private var gpsProviderRegistered = false
     private var networkProviderRegistered = false
     private var passiveProviderRegistered = false
+    private var fusedMockEnabled = false
 
     private val random = Random(System.nanoTime())
 
@@ -69,6 +77,9 @@ class MockController(
         if (!passiveProviderRegistered) {
             ensureTestProvider(PASSIVE_PROVIDER)
         }
+
+        // Enable FusedLocationProviderClient mock mode
+        enableFusedMock()
 
         simulator.reset()
 
@@ -112,6 +123,9 @@ class MockController(
                     } catch (_: Exception) { }
                 }
 
+                // Push to FusedLocationProviderClient (CRITICAL for modern apps)
+                pushFusedLocation(gpsLocation)
+
                 // Timing jitter: 180-220ms instead of constant 200ms (Method 6 - AI bypass)
                 val jitteredDelay = BASE_DELAY_MS + random.nextInt(JITTER_RANGE_MS) - (JITTER_RANGE_MS / 2)
                 delay(jitteredDelay.toLong())
@@ -130,6 +144,9 @@ class MockController(
 
         // Reset simulator state for clean restart
         simulator.reset()
+
+        // Disable fused mock mode
+        disableFusedMock()
 
         // Disable and REMOVE test providers to prevent detection
         if (gpsProviderRegistered) {
@@ -153,6 +170,52 @@ class MockController(
                 passiveProviderRegistered = false
             } catch (_: Exception) { }
         }
+    }
+
+    /**
+     * Enable mock mode on FusedLocationProviderClient.
+     * This is CRITICAL - most modern apps use FusedLocation, not LocationManager directly.
+     */
+    @Suppress("MissingPermission")
+    private fun enableFusedMock() {
+        try {
+            fusedClient.setMockMode(true)
+                .addOnSuccessListener { fusedMockEnabled = true }
+                .addOnFailureListener { fusedMockEnabled = false }
+        } catch (_: Exception) {
+            fusedMockEnabled = false
+        }
+    }
+
+    /**
+     * Disable mock mode on FusedLocationProviderClient.
+     */
+    @Suppress("MissingPermission")
+    private fun disableFusedMock() {
+        if (fusedMockEnabled) {
+            try {
+                fusedClient.setMockMode(false)
+                fusedMockEnabled = false
+            } catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * Push a mock location to the FusedLocationProviderClient.
+     * This ensures apps using Google Play Services location get the mock position.
+     */
+    @Suppress("MissingPermission")
+    private fun pushFusedLocation(baseLocation: Location) {
+        if (!fusedMockEnabled) return
+        try {
+            // Create a clean location for fused provider
+            val fusedLocation = Location(baseLocation).apply {
+                provider = "fused"
+                time = System.currentTimeMillis()
+                elapsedRealtimeNanos = System.nanoTime()
+            }
+            fusedClient.setMockLocation(fusedLocation)
+        } catch (_: Exception) { }
     }
 
     private fun ensureTestProvider(providerName: String): Boolean {
@@ -187,7 +250,6 @@ class MockController(
             }
             false
         } catch (illegalArgumentException: IllegalArgumentException) {
-            // The provider already exists – treat as success.
             when (providerName) {
                 GPS_PROVIDER -> gpsProviderRegistered = true
                 NETWORK_PROVIDER -> networkProviderRegistered = true
